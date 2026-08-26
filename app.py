@@ -6,26 +6,23 @@ import psycopg2
 
 st.set_page_config(page_title="Rwanda Basic Needs Basket & Market Price Dashboard", layout="wide")
 
-@st.cache_resource
-def init_db():
+def get_db_connection():
     db_url = st.secrets.get("DATABASE_URL") or os.environ.get("DATABASE_URL")
     if not db_url:
         st.error("Missing DATABASE_URL configuration in Streamlit Secrets.")
         st.stop()
     return psycopg2.connect(db_url)
 
-try:
-    conn = init_db()
-except Exception as e:
-    st.error(f"Failed to connect to Neon Database: {e}")
-    st.stop()
-
 @st.cache_data(ttl=300)
 def load_all_data():
-    df_wfp = pd.read_sql("SELECT * FROM market_prices ORDER BY date DESC;", conn)
-    df_nisr = pd.read_sql("SELECT * FROM nisr_cpi_weights ORDER BY weight_percentage DESC;", conn)
-    df_village = pd.read_sql("SELECT * FROM local_village_prices ORDER BY created_at DESC;", conn)
-    return df_wfp, df_nisr, df_village
+    conn = get_db_connection()
+    try:
+        df_wfp = pd.read_sql("SELECT * FROM market_prices ORDER BY date DESC;", conn)
+        df_nisr = pd.read_sql("SELECT * FROM nisr_cpi_weights ORDER BY weight_percentage DESC;", conn)
+        df_village = pd.read_sql("SELECT * FROM local_village_prices ORDER BY created_at DESC;", conn)
+        return df_wfp, df_nisr, df_village
+    finally:
+        conn.close()
 
 st.title("🇷🇼 Rwanda Basic Needs Basket & Market Price Dashboard")
 
@@ -130,13 +127,18 @@ try:
             if not (district_in and sector_in and village_in and commodity_in):
                 st.error("Please fill in District, Sector, Village, and Commodity fields.")
             else:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO local_village_prices (province, district, sector, cell, village, commodity, unit, price_rwf, reporter_name)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
-                """, (province_in, district_in, sector_in, cell_in, village_in, commodity_in, unit_in, price_in, reporter_in))
-                conn.commit()
-                cursor.close()
+                conn_submit = get_db_connection()
+                try:
+                    cursor = conn_submit.cursor()
+                    cursor.execute("""
+                        INSERT INTO local_village_prices (province, district, sector, cell, village, commodity, unit, price_rwf, reporter_name)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
+                    """, (province_in, district_in, sector_in, cell_in, village_in, commodity_in, unit_in, price_in, reporter_in))
+                    conn_submit.commit()
+                    cursor.close()
+                finally:
+                    conn_submit.close()
+
                 st.success(f"Reported {price_in} RWF for {commodity_in} in {village_in} Village ({sector_in} Sector)!")
                 st.cache_data.clear()
 
