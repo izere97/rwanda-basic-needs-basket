@@ -31,15 +31,16 @@ try:
 
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Official WFP & NISR Metrics", 
-        "🏡 Sector, Cell & Village Local Data",
-        "🎯 Custom Local Basket Calculator",
-        "✏️ Edit & Update Prices"
+        "🏡 Report & Store Local Data",
+        "🎯 Complete BNB & Cost-of-Living Calculator",
+        "✏️ Edit Database Prices"
     ])
 
-    # TAB 1: OFFICIAL DATA
+    # -----------------------------------------------------------------------------
+    # TAB 1: OFFICIAL WFP & NISR METRICS
+    # -----------------------------------------------------------------------------
     with tab1:
-        st.header("Official Market Data & Basic Needs Basket Engine")
-        
+        st.header("Official Market Data & NISR Benchmarks")
         if df_wfp.empty:
             st.warning("No official WFP market records found.")
         else:
@@ -49,16 +50,15 @@ try:
             col_a, col_b = st.columns(2)
             with col_a:
                 provinces = ["All"] + sorted([p for p in df_wfp['admin1'].unique() if p])
-                selected_province = st.selectbox("Select Province", options=provinces)
+                selected_province = st.selectbox("Select Province", options=provinces, key="tab1_prov")
             with col_b:
                 filtered_wfp = df_wfp if selected_province == "All" else df_wfp[df_wfp['admin1'] == selected_province]
                 districts = ["All"] + sorted([d for d in filtered_wfp['admin2'].unique() if d])
-                selected_district = st.selectbox("Select District", options=districts)
+                selected_district = st.selectbox("Select District", options=districts, key="tab1_dist")
 
             if selected_district != "All":
                 filtered_wfp = filtered_wfp[filtered_wfp['admin2'] == selected_district]
 
-            # NISR Weights
             st.subheader("1. NISR CPI Reference Matrix")
             col1, col2 = st.columns([1, 1])
             with col1:
@@ -67,33 +67,7 @@ try:
                 fig_pie = px.pie(df_nisr, names="category", values="weight_percentage", title="NISR Basket Weights (%)")
                 st.plotly_chart(fig_pie, use_container_width=True)
 
-            # Basic Needs Basket Engine
-            st.subheader("2. Minimum Basic Needs Basket (Household of 5)")
-            latest_prices = filtered_wfp.groupby('commodity')['price_rwf'].median().reset_index()
-            basket_quantities = {'Beans': 15, 'Rice': 10, 'Maize flour': 12, 'Potatoes (Irish)': 25, 'Cassava flour': 10, 'Cooking oil': 3}
-
-            basket_items = []
-            total_food_cost = 0
-            for item, qty in basket_quantities.items():
-                match = latest_prices[latest_prices['commodity'].str.contains(item, case=False, na=False)]
-                if not match.empty:
-                    unit_price = match['price_rwf'].values[0]
-                    monthly_cost = unit_price * qty
-                    total_food_cost += monthly_cost
-                    basket_items.append({'Item': item, 'Monthly Quantity': f"{qty} kg/L", 'Median Unit Price (RWF)': f"{unit_price:,.2f}", 'Estimated Cost (RWF)': monthly_cost})
-
-            st.dataframe(pd.DataFrame(basket_items), use_container_width=True)
-
-            if total_food_cost > 0:
-                food_weight = 0.358
-                estimated_total = total_food_cost / food_weight
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Monthly Food Basket", f"{total_food_cost:,.0f} RWF")
-                c2.metric("NISR Food Weight", f"{food_weight * 100:.1f}%")
-                c3.metric("Est. Total Basic Needs", f"{estimated_total:,.0f} RWF")
-
-            # WFP Trends
-            st.subheader("3. WFP Market Price Trends")
+            st.subheader("2. WFP Market Price Trends")
             all_commodities = filtered_wfp['commodity'].dropna().unique()
             selected_commodities = st.multiselect("Select Commodities to Graph", options=all_commodities, default=list(all_commodities[:3]) if len(all_commodities) >= 3 else list(all_commodities))
             graph_df = filtered_wfp[filtered_wfp['commodity'].isin(selected_commodities)]
@@ -101,10 +75,11 @@ try:
                 fig_line = px.line(graph_df, x="date", y="price_rwf", color="commodity", title="Official Price Trends (RWF)")
                 st.plotly_chart(fig_line, use_container_width=True)
 
-    # TAB 2: LOCAL SUB-DISTRICT DATA
+    # -----------------------------------------------------------------------------
+    # TAB 2: LOCAL SUB-DISTRICT REPORTING & DATABASE
+    # -----------------------------------------------------------------------------
     with tab2:
-        st.header("Custom Local Data Collection (Sector, Cell, Village Level)")
-        
+        st.header("Custom Local Data Collection")
         st.subheader("1. Report Local Market Price")
         with st.form("local_village_form"):
             f_col1, f_col2, f_col3 = st.columns(3)
@@ -144,134 +119,176 @@ try:
                 finally:
                     conn_submit.close()
 
-                st.success(f"Reported {price_in} RWF for {commodity_in} in {village_in} Village ({sector_in} Sector)!")
+                st.success(f"Reported {price_in} RWF for {commodity_in} in {village_in} Village!")
                 st.cache_data.clear()
 
         st.subheader("2. Local Village Price Database")
         if df_village.empty:
-            st.info("No local village entries recorded yet. Use the form above to submit data.")
+            st.info("No local village entries recorded yet.")
         else:
             st.dataframe(df_village, use_container_width=True)
 
-    # TAB 3: CUSTOM LOCAL BASKET CALCULATOR
+    # -----------------------------------------------------------------------------
+    # TAB 3: COMPLETE BNB & COST-OF-LIVING CALCULATOR (FOOD & NON-FOOD LIST)
+    # -----------------------------------------------------------------------------
     with tab3:
-        st.header("🎯 Regional Basic Needs Basket Calculator (Custom Data)")
-        st.markdown("Compute family cost-of-living metrics strictly using your sub-district local price inputs.")
+        st.header("🎯 Comprehensive Basic Needs Basket & Cost of Living Engine")
+        st.markdown("Select location filters, configure family size, enter commodity prices, and calculate overall cost of living.")
 
-        if df_village.empty:
-            st.info("No local price entries available yet. Submit data in Tab 2 to enable calculations.")
-        else:
-            # 5-Level Administrative Cascading Filters
-            st.subheader("1. Select Geographic Location")
-            f1, f2, f3, f4, f5 = st.columns(5)
+        # 1. Five Administrative Level Geographic Cascade
+        st.subheader("1. Exact Geographic Location Selection")
+        g1, g2, g3, g4, g5 = st.columns(5)
+        df_calc = df_village.copy() if not df_village.empty else pd.DataFrame(columns=['province', 'district', 'sector', 'cell', 'village', 'commodity', 'price_rwf'])
+
+        with g1:
+            prov_opts = ["All"] + (sorted([p for p in df_calc['province'].dropna().unique() if p]) if not df_calc.empty else [])
+            sel_prov = st.selectbox("Province", prov_opts, key="bnb_prov")
+        if sel_prov != "All" and not df_calc.empty:
+            df_calc = df_calc[df_calc['province'] == sel_prov]
+
+        with g2:
+            dist_opts = ["All"] + (sorted([d for d in df_calc['district'].dropna().unique() if d]) if not df_calc.empty else [])
+            sel_dist = st.selectbox("District", dist_opts, key="bnb_dist")
+        if sel_dist != "All" and not df_calc.empty:
+            df_calc = df_calc[df_calc['district'] == sel_dist]
+
+        with g3:
+            sec_opts = ["All"] + (sorted([s for s in df_calc['sector'].dropna().unique() if s]) if not df_calc.empty else [])
+            sel_sec = st.selectbox("Sector", sec_opts, key="bnb_sec")
+        if sel_sec != "All" and not df_calc.empty:
+            df_calc = df_calc[df_calc['sector'] == sel_sec]
+
+        with g4:
+            cell_opts = ["All"] + (sorted([c for c in df_calc['cell'].dropna().unique() if c]) if not df_calc.empty else [])
+            sel_cell = st.selectbox("Cell", cell_opts, key="bnb_cell")
+        if sel_cell != "All" and not df_calc.empty:
+            df_calc = df_calc[df_calc['cell'] == sel_cell]
+
+        with g5:
+            vil_opts = ["All"] + (sorted([v for v in df_calc['village'].dropna().unique() if v]) if not df_calc.empty else [])
+            sel_vil = st.selectbox("Village", vil_opts, key="bnb_vil")
+        if sel_vil != "All" and not df_calc.empty:
+            df_calc = df_calc[df_calc['village'] == sel_vil]
+
+        # 2. Family Parameters & Macro-Weight Ratios
+        st.subheader("2. Family Parameters & NISR Weight Ratio")
+        p1, p2 = st.columns(2)
+        with p1:
+            hh_members = st.number_input("Household Size (Persons)", min_value=1, value=5, step=1, key="bnb_hh_size")
+        with p2:
+            food_share_pct = st.slider(
+                "NISR Food Expenditure Share (%)", 
+                min_value=20.0, max_value=60.0, value=35.8, step=0.1,
+                help="National Institute of Statistics of Rwanda benchmark food allocation ratio (~35.8%)."
+            )
+
+        # 3. Master List of Essential Food & Non-Food Items (Standard Monthly Base per 5 Household Members)
+        scale_ratio = hh_members / 5.0
+        
+        default_bnb_items = [
+            # --- FOOD ITEMS ---
+            {"Category": "Food (Staples)", "Item": "Dry Beans (Ibibonobono)", "Standard Unit": "1 KG", "Monthly Qty": 15.0 * scale_ratio, "Default Price": 900.0},
+            {"Category": "Food (Staples)", "Item": "Rice (Umuceri)", "Standard Unit": "1 KG", "Monthly Qty": 10.0 * scale_ratio, "Default Price": 1400.0},
+            {"Category": "Food (Staples)", "Item": "Maize Flour (Ufu w'ibigori)", "Standard Unit": "1 KG", "Monthly Qty": 12.0 * scale_ratio, "Default Price": 800.0},
+            {"Category": "Food (Staples)", "Item": "Irish Potatoes (Ibirayi)", "Standard Unit": "1 KG", "Monthly Qty": 25.0 * scale_ratio, "Default Price": 450.0},
+            {"Category": "Food (Staples)", "Item": "Cassava Flour (Ufu w'imyumbati)", "Standard Unit": "1 KG", "Monthly Qty": 10.0 * scale_ratio, "Default Price": 600.0},
+            {"Category": "Food (Fats)", "Item": "Cooking Oil (Amavuta yo guteka)", "Standard Unit": "1 Liter", "Monthly Qty": 3.0 * scale_ratio, "Default Price": 2500.0},
+            {"Category": "Food (Proteins)", "Item": "Fresh Milk (Amata)", "Standard Unit": "1 Liter", "Monthly Qty": 15.0 * scale_ratio, "Default Price": 600.0},
+            {"Category": "Food (Fresh Produce)", "Item": "Vegetables & Tomatoes (Imboga n'inyanya)", "Standard Unit": "1 KG", "Monthly Qty": 12.0 * scale_ratio, "Default Price": 700.0},
+            {"Category": "Food (Essentials)", "Item": "Iodized Salt (Umunyu)", "Standard Unit": "1 KG", "Monthly Qty": 1.0 * scale_ratio, "Default Price": 400.0},
+            {"Category": "Food (Essentials)", "Item": "Sugar (Isukari)", "Standard Unit": "1 KG", "Monthly Qty": 2.0 * scale_ratio, "Default Price": 1500.0},
             
-            df_calc = df_village.copy()
-            
-            with f1:
-                prov_opts = ["All"] + sorted([p for p in df_calc['province'].dropna().unique() if p])
-                sel_prov = st.selectbox("Province", prov_opts, key="calc_prov")
-            if sel_prov != "All":
-                df_calc = df_calc[df_calc['province'] == sel_prov]
+            # --- NON-FOOD ITEMS (NFI) & SERVICES ---
+            {"Category": "Non-Food (Energy)", "Item": "Charcoal / Fuelwood (Amakara)", "Standard Unit": "1 Large Sack", "Monthly Qty": 1.5 * scale_ratio, "Default Price": 12000.0},
+            {"Category": "Non-Food (Hygiene)", "Item": "Laundry Bar Soap (Isabune)", "Standard Unit": "1 Bar", "Monthly Qty": 5.0 * scale_ratio, "Default Price": 1000.0},
+            {"Category": "Non-Food (Hygiene)", "Item": "Bathing Soap & Toothpaste", "Standard Unit": "Monthly Set", "Monthly Qty": 1.0 * scale_ratio, "Default Price": 3000.0},
+            {"Category": "Non-Food (Housing)", "Item": "House Rent (Inzu)", "Standard Unit": "Monthly Flat Rate", "Monthly Qty": 1.0, "Default Price": 35000.0},
+            {"Category": "Non-Food (Utilities)", "Item": "Water Supply Fees (Azi)", "Standard Unit": "Monthly Estimate", "Monthly Qty": 1.0, "Default Price": 4000.0},
+            {"Category": "Non-Food (Utilities)", "Item": "Electricity & Lighting (Mutagatifu)", "Standard Unit": "Monthly Estimate", "Monthly Qty": 1.0, "Default Price": 5000.0},
+            {"Category": "Non-Food (Healthcare)", "Item": "Mutuelle de Santé Allocation", "Standard Unit": "Monthly Person Share", "Monthly Qty": 1.0 * hh_members, "Default Price": 3000.0},
+            {"Category": "Non-Food (Services)", "Item": "Public Transport & Airtime", "Standard Unit": "Monthly Estimate", "Monthly Qty": 1.0, "Default Price": 10000.0}
+        ]
 
-            with f2:
-                dist_opts = ["All"] + sorted([d for d in df_calc['district'].dropna().unique() if d])
-                sel_dist = st.selectbox("District", dist_opts, key="calc_dist")
-            if sel_dist != "All":
-                df_calc = df_calc[df_calc['district'] == sel_dist]
+        # Auto-population from stored database values if present
+        if not df_calc.empty:
+            db_medians = df_calc.groupby('commodity')['price_rwf'].median().to_dict()
+            for row in default_bnb_items:
+                for db_comm, db_price in db_medians.items():
+                    if db_comm.lower() in row['Item'].lower():
+                        row['Default Price'] = float(db_price)
+                        break
 
-            with f3:
-                sec_opts = ["All"] + sorted([s for s in df_calc['sector'].dropna().unique() if s])
-                sel_sec = st.selectbox("Sector", sec_opts, key="calc_sec")
-            if sel_sec != "All":
-                df_calc = df_calc[df_calc['sector'] == sel_sec]
+        df_input_base = pd.DataFrame(default_bnb_items)
+        df_input_base.rename(columns={"Default Price": "Entered Unit Price (RWF)"}, inplace=True)
 
-            with f4:
-                cell_opts = ["All"] + sorted([c for c in df_calc['cell'].dropna().unique() if c])
-                sel_cell = st.selectbox("Cell", cell_opts, key="calc_cell")
-            if sel_cell != "All":
-                df_calc = df_calc[df_calc['cell'] == sel_cell]
+        st.subheader("3. Comprehensive Price Entry Table (Food + Non-Food)")
+        st.caption("Update unit prices directly in the grid below. Monthly totals recalculate automatically.")
 
-            with f5:
-                vil_opts = ["All"] + sorted([v for v in df_calc['village'].dropna().unique() if v])
-                sel_vil = st.selectbox("Village", vil_opts, key="calc_vil")
-            if sel_vil != "All":
-                df_calc = df_calc[df_calc['village'] == sel_vil]
-
-            st.divider()
-
-            # Household Parameters
-            st.subheader("2. Family Parameters")
-            c_hh, c_weight = st.columns(2)
-            with c_hh:
-                household_members = st.number_input("Household Size (Persons)", min_value=1, value=5, step=1)
-            with c_weight:
-                food_weight_share = st.slider("Food Expenditure Weight (%)", min_value=20, max_value=60, value=36, help="Standard NISR food expenditure weight is ~35.8%")
-
-            # Compute Local Basket
-            st.subheader("3. Calculated Monthly Basic Needs Basket")
-            
-            # Per-person base monthly quantities scaled by family size
-            basket_rules = {
-                'Beans': 3.0 * household_members,
-                'Rice': 2.0 * household_members,
-                'Maize flour': 2.5 * household_members,
-                'Potatoes': 5.0 * household_members,
-                'Cassava flour': 2.0 * household_members,
-                'Cooking oil': 0.6 * household_members
+        edited_bnb_df = st.data_editor(
+            df_input_base,
+            key="bnb_data_editor",
+            use_container_width=True,
+            num_rows="dynamic",
+            column_config={
+                "Entered Unit Price (RWF)": st.column_config.NumberColumn("Entered Unit Price (RWF)", min_value=0.0, format="%d RWF"),
+                "Monthly Qty": st.column_config.NumberColumn("Monthly Qty", format="%.1f"),
             }
+        )
 
-            local_medians = df_calc.groupby('commodity')['price_rwf'].median().reset_index()
+        edited_bnb_df['Total Monthly Cost (RWF)'] = edited_bnb_df['Monthly Qty'] * edited_bnb_df['Entered Unit Price (RWF)']
+        
+        food_total = edited_bnb_df[edited_bnb_df['Category'].str.startswith('Food')]['Total Monthly Cost (RWF)'].sum()
+        non_food_direct = edited_bnb_df[edited_bnb_df['Category'].str.startswith('Non-Food')]['Total Monthly Cost (RWF)'].sum()
+        direct_grand_total = food_total + non_food_direct
 
-            calc_basket_items = []
-            custom_food_cost = 0
+        # Mathematical Expenditure Weight Calculations
+        food_weight_ratio = food_share_pct / 100.0
+        weighted_grand_total = food_total / food_weight_ratio if food_weight_ratio > 0 else 0
+        non_food_weighted = weighted_grand_total - food_total
 
-            for item, qty in basket_rules.items():
-                match = local_medians[local_medians['commodity'].str.contains(item, case=False, na=False)]
-                if not match.empty:
-                    u_price = match['price_rwf'].values[0]
-                    subtotal = u_price * qty
-                    custom_food_cost += subtotal
-                    calc_basket_items.append({
-                        'Commodity': item,
-                        'Monthly Quantity': f"{qty:.1f} kg/L",
-                        'Local Median Price (RWF)': f"{u_price:,.2f}",
-                        'Subtotal (RWF)': subtotal
-                    })
+        st.divider()
 
-            if calc_basket_items:
-                st.dataframe(pd.DataFrame(calc_basket_items), use_container_width=True)
-            else:
-                st.warning("No price entries match the baseline basket items in this location selection. Add price data for Beans, Rice, Maize flour, Potatoes, Cassava flour, or Cooking oil.")
+        # 4. Comparative Calculation Options
+        st.subheader("4. Cost-of-Living Calculation Results")
+        
+        calc_method = st.radio(
+            "Select Non-Food Calculation Approach", 
+            ["Direct Itemized Sum (Exact NFI List Above)", "Mathematical Expenditure Weight Estimation (NISR Share Ratio)"], 
+            horizontal=True
+        )
 
-            if custom_food_cost > 0:
-                food_ratio = food_weight_share / 100.0
-                total_cost_of_living = custom_food_cost / food_ratio
-                non_food_cost = total_cost_of_living - custom_food_cost
+        if calc_method == "Direct Itemized Sum (Exact NFI List Above)":
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Food Basket Total", f"{food_total:,.0f} RWF")
+            m2.metric("Direct Non-Food Total", f"{non_food_direct:,.0f} RWF")
+            m3.metric("Itemized Cost of Living", f"{direct_grand_total:,.0f} RWF")
+            
+            fig_chart = px.pie(edited_bnb_df, names="Category", values="Total Monthly Cost (RWF)", title="Complete Itemized Expenditure Breakdown")
+            st.plotly_chart(fig_chart, use_container_width=True)
+        else:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Food Basket Total", f"{food_total:,.0f} RWF")
+            m2.metric(f"Est. Non-Food Expenses ({100-food_share_pct:.1f}%)", f"{non_food_weighted:,.0f} RWF")
+            m3.metric("Est. Total Cost of Living (Weighted)", f"{weighted_grand_total:,.0f} RWF")
+            
+            weight_df = pd.DataFrame({
+                "Expense Type": ["Food Basket Total", "Estimated Non-Food Needs"],
+                "Amount (RWF)": [food_total, non_food_weighted]
+            })
+            fig_chart = px.pie(weight_df, names="Expense Type", values="Amount (RWF)", title=f"Expenditure Breakdown based on {food_share_pct}% Food Weight Allocation")
+            st.plotly_chart(fig_chart, use_container_width=True)
 
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Monthly Food Basket", f"{custom_food_cost:,.0f} RWF")
-                m2.metric("Est. Non-Food Expenses (Rent, Utilities, etc.)", f"{non_food_cost:,.0f} RWF")
-                m3.metric("Total Cost of Living", f"{total_cost_of_living:,.0f} RWF")
-
-                chart_df = pd.DataFrame({
-                    "Category": ["Food Basket", "Non-Food Needs"],
-                    "Cost (RWF)": [custom_food_cost, non_food_cost]
-                })
-                fig_breakdown = px.pie(chart_df, names="Category", values="Cost (RWF)", title="Expenditure Breakdown")
-                st.plotly_chart(fig_breakdown, use_container_width=True)
-
-    # TAB 4: PRICE MODIFICATION & EDITING ENGINE
+    # -----------------------------------------------------------------------------
+    # TAB 4: DATABASE EDITING ENGINE
+    # -----------------------------------------------------------------------------
     with tab4:
         st.header("✏️ Price Modification Engine")
-        st.markdown("Edit existing commodity prices directly below and click **Save Modifications** to update the database.")
-
         dataset_choice = st.radio("Select Target Dataset to Edit", ["Local Sub-District / Village Prices", "Official WFP Market Prices"], horizontal=True)
 
         if dataset_choice == "Local Sub-District / Village Prices":
             if df_village.empty:
                 st.info("No local village records available to edit.")
             else:
-                st.subheader("Edit Village Level Entries")
                 editable_village = df_village.copy()
                 edited_village_df = st.data_editor(
                     editable_village,
@@ -302,8 +319,6 @@ try:
             if df_wfp.empty:
                 st.info("No official market records available to edit.")
             else:
-                st.subheader("Filter & Update Official WFP Market Prices")
-                
                 select_comm = st.selectbox("Select Commodity to Modify", options=sorted(df_wfp['commodity'].dropna().unique()))
                 filter_wfp_edit = df_wfp[df_wfp['commodity'] == select_comm].head(100).copy()
                 
