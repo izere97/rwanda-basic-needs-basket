@@ -32,7 +32,6 @@ st.title("🇷🇼 Rwanda Basic Needs Basket & Market Price Dashboard")
 try:
     df_wfp, df_nisr, df_village = load_all_data()
 
-    # Layout Tabs
     tab1, tab2 = st.tabs(["📊 Official WFP & NISR Metrics", "🏡 Sector, Cell & Village Local Data"])
 
     # TAB 1: OFFICIAL DATA
@@ -45,7 +44,6 @@ try:
             df_wfp['date'] = pd.to_datetime(df_wfp['date'])
             df_wfp['price_rwf'] = pd.to_numeric(df_wfp['price_rwf'])
 
-            # Geographic Filters
             col_a, col_b = st.columns(2)
             with col_a:
                 provinces = ["All"] + sorted([p for p in df_wfp['admin1'].unique() if p])
@@ -58,7 +56,7 @@ try:
             if selected_district != "All":
                 filtered_wfp = filtered_wfp[filtered_wfp['admin2'] == selected_district]
 
-            # 1. NISR Metrics
+            # NISR Weights
             st.subheader("1. NISR CPI Reference Matrix")
             col1, col2 = st.columns([1, 1])
             with col1:
@@ -67,7 +65,7 @@ try:
                 fig_pie = px.pie(df_nisr, names="category", values="weight_percentage", title="NISR Basket Weights (%)")
                 st.plotly_chart(fig_pie, use_container_width=True)
 
-            # 2. Basic Needs Engine
+            # Basic Needs Basket Engine
             st.subheader("2. Minimum Basic Needs Basket (Household of 5)")
             latest_prices = filtered_wfp.groupby('commodity')['price_rwf'].median().reset_index()
             basket_quantities = {'Beans': 15, 'Rice': 10, 'Maize flour': 12, 'Potatoes (Irish)': 25, 'Cassava flour': 10, 'Cooking oil': 3}
@@ -92,7 +90,7 @@ try:
                 c2.metric("NISR Food Weight", f"{food_weight * 100:.1f}%")
                 c3.metric("Est. Total Basic Needs", f"{estimated_total:,.0f} RWF")
 
-            # 3. Market Trends
+            # WFP Trends
             st.subheader("3. WFP Market Price Trends")
             all_commodities = filtered_wfp['commodity'].dropna().unique()
             selected_commodities = st.multiselect("Select Commodities to Graph", options=all_commodities, default=list(all_commodities[:3]) if len(all_commodities) >= 3 else list(all_commodities))
@@ -101,7 +99,7 @@ try:
                 fig_line = px.line(graph_df, x="date", y="price_rwf", color="commodity", title="Official Price Trends (RWF)")
                 st.plotly_chart(fig_line, use_container_width=True)
 
-    # TAB 2: LOCAL SUB-DISTRICT DATA (SECTORS, CELLS, VILLAGES)
+    # TAB 2: LOCAL SUB-DISTRICT DATA
     with tab2:
         st.header("Custom Local Data Collection (Sector, Cell, Village Level)")
         
