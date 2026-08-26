@@ -29,7 +29,11 @@ st.title("🇷🇼 Rwanda Basic Needs Basket & Market Price Dashboard")
 try:
     df_wfp, df_nisr, df_village = load_all_data()
 
-    tab1, tab2 = st.tabs(["📊 Official WFP & NISR Metrics", "🏡 Sector, Cell & Village Local Data"])
+    tab1, tab2, tab3 = st.tabs([
+        "📊 Official WFP & NISR Metrics", 
+        "🏡 Sector, Cell & Village Local Data",
+        "✏️ Edit & Update Prices"
+    ])
 
     # TAB 1: OFFICIAL DATA
     with tab1:
@@ -147,6 +151,79 @@ try:
             st.info("No local village entries recorded yet. Use the form above to submit data.")
         else:
             st.dataframe(df_village, use_container_width=True)
+
+    # TAB 3: PRICE MODIFICATION & EDITING ENGINE
+    with tab3:
+        st.header("✏️ Price Modification Engine")
+        st.markdown("Edit existing commodity prices directly below and click **Save Modifications** to update the database.")
+
+        dataset_choice = st.radio("Select Target Dataset to Edit", ["Local Sub-District / Village Prices", "Official WFP Market Prices"], horizontal=True)
+
+        if dataset_choice == "Local Sub-District / Village Prices":
+            if df_village.empty:
+                st.info("No local village records available to edit.")
+            else:
+                st.subheader("Edit Village Level Entries")
+                editable_village = df_village.copy()
+                edited_village_df = st.data_editor(
+                    editable_village,
+                    key="village_editor",
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    column_config={"id": st.column_config.NumberColumn(disabled=True)}
+                )
+
+                if st.button("Save Village Price Changes"):
+                    conn_edit = get_db_connection()
+                    try:
+                        cursor = conn_edit.cursor()
+                        for idx, row in edited_village_df.iterrows():
+                            cursor.execute("""
+                                UPDATE local_village_prices 
+                                SET price_rwf = %s, commodity = %s, unit = %s, sector = %s, cell = %s, village = %s
+                                WHERE id = %s;
+                            """, (row['price_rwf'], row['commodity'], row['unit'], row['sector'], row['cell'], row['village'], row['id']))
+                        conn_edit.commit()
+                        cursor.close()
+                        st.success("Successfully updated local village prices!")
+                        st.cache_data.clear()
+                    finally:
+                        conn_edit.close()
+
+        else:
+            if df_wfp.empty:
+                st.info("No official market records available to edit.")
+            else:
+                st.subheader("Filter & Update Official WFP Market Prices")
+                
+                # Commodity filter to keep editor responsive
+                select_comm = st.selectbox("Select Commodity to Modify", options=sorted(df_wfp['commodity'].dropna().unique()))
+                filter_wfp_edit = df_wfp[df_wfp['commodity'] == select_comm].head(100).copy()
+                
+                edited_wfp_df = st.data_editor(
+                    filter_wfp_edit,
+                    key="wfp_editor",
+                    num_rows="fixed",
+                    use_container_width=True,
+                    column_config={"id": st.column_config.NumberColumn(disabled=True)}
+                )
+
+                if st.button("Save Official WFP Price Changes"):
+                    conn_edit = get_db_connection()
+                    try:
+                        cursor = conn_edit.cursor()
+                        for idx, row in edited_wfp_df.iterrows():
+                            cursor.execute("""
+                                UPDATE market_prices 
+                                SET price_rwf = %s
+                                WHERE id = %s;
+                            """, (row['price_rwf'], row['id']))
+                        conn_edit.commit()
+                        cursor.close()
+                        st.success(f"Updated price entries for {select_comm}!")
+                        st.cache_data.clear()
+                    finally:
+                        conn_edit.close()
 
 except Exception as err:
     st.error(f"Error loading application: {err}")
