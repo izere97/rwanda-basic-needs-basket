@@ -2,32 +2,31 @@ import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from supabase import create_client, Client
+import psycopg2
 
 st.set_page_config(page_title="Rwanda Basic Needs Basket", layout="wide")
 
 @st.cache_resource
-def init_supabase() -> Client:
-    # Read secrets with explicit key checks
-    url = st.secrets.get("SUPABASE_URL") or os.environ.get("SUPABASE_URL")
-    key = st.secrets.get("SUPABASE_KEY") or os.environ.get("SUPABASE_KEY")
+def init_db():
+    # Read Postgres Connection URL from Secrets or Environment
+    db_url = st.secrets.get("DATABASE_URL") or os.environ.get("DATABASE_URL")
     
-    if not url or not key:
-        st.error("Missing SUPABASE_URL or SUPABASE_KEY in Streamlit Secrets.")
+    if not db_url:
+        st.error("Missing DATABASE_URL in Streamlit Secrets.")
         st.stop()
         
-    return create_client(url, key)
+    return psycopg2.connect(db_url)
 
 try:
-    supabase = init_supabase()
+    conn = init_db()
 except Exception as e:
-    st.error(f"Failed to connect to Supabase: {e}")
+    st.error(f"Failed to connect to Neon Database: {e}")
     st.stop()
 
 @st.cache_data(ttl=3600)
 def load_market_data():
-    res = supabase.table("market_prices").select("*").execute()
-    return pd.DataFrame(res.data)
+    query = "SELECT * FROM market_prices;"
+    return pd.read_sql(query, conn)
 
 st.title("🇷🇼 Rwanda Food Basket & Market Price Dashboard")
 
@@ -36,9 +35,9 @@ try:
     if df_prices.empty:
         st.warning("Database connected, but `market_prices` table is currently empty.")
     else:
-        st.success(f"Successfully loaded {len(df_prices)} market records!")
+        st.success(f"Successfully loaded {len(df_prices)} market records from Neon!")
         
-        # Format date column
+        # Preprocessing
         df_prices['date'] = pd.to_datetime(df_prices['date'])
         df_prices['price_rwf'] = pd.to_numeric(df_prices['price_rwf'])
 
@@ -59,7 +58,7 @@ try:
             (df_prices['commodity'].isin(selected_commodities))
         ]
 
-        # Commodity Price Trends Line Chart
+        # Trend Chart
         st.header("1. Commodity Price Trends")
         if not filtered_df.empty:
             fig = px.line(
@@ -71,11 +70,11 @@ try:
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("No data available for selected filter combination.")
+            st.info("No data available for selected filters.")
 
-        # Data Table View
+        # Data Table
         st.header("2. Scraped Market Data Table")
         st.dataframe(df_prices, use_container_width=True)
 
 except Exception as err:
-    st.error(f"Error fetching table data: {err}")
+    st.error(f"Error executing SQL query: {err}")
