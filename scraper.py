@@ -3,6 +3,7 @@ import io
 import requests
 import pandas as pd
 import psycopg2
+from psycopg2.extras import execute_values
 
 WFP_RWANDA_CSV_URL = "https://data.humdata.org/dataset/a4a84c1c-81d1-491b-9fbe-1955ae736508/resource/8c22eeb5-cc2e-46bc-8a0d-08b7486b2486/download/wfp_food_prices_rwa.csv"
 FALLBACK_DB_URL = "postgresql://neondb_owner:npg_QNeqPho0Eb6g@ep-weathered-wind-axfc5in6-pooler.c-4.us-east-2.aws.neon.tech/neondb?sslmode=require"
@@ -43,7 +44,7 @@ def sync_wfp_data(conn):
 
     insert_query = """
         INSERT INTO market_prices (market_name, admin1, admin2, commodity, category, unit, price_rwf, date)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES %s
         ON CONFLICT (market_name, commodity, date, unit) 
         DO UPDATE SET price_rwf = EXCLUDED.price_rwf;
     """
@@ -53,10 +54,11 @@ def sync_wfp_data(conn):
         for _, row in df.iterrows()
     ]
 
-    cursor.executemany(insert_query, data_tuples)
+    # Optimized bulk payload insertion (10,000 rows per batch)
+    execute_values(cursor, insert_query, data_tuples, page_size=10000)
     conn.commit()
     cursor.close()
-    print("WFP dataset synced successfully!")
+    print(f"Synced {len(data_tuples)} WFP market price points in bulk!")
 
 def sync_nisr_cpi_weights(conn):
     print("Syncing NISR CPI weight matrix...")
@@ -88,18 +90,18 @@ def sync_nisr_cpi_weights(conn):
 
     insert_query = """
         INSERT INTO nisr_cpi_weights (category, weight_percentage, basket_group)
-        VALUES (%s, %s, %s)
+        VALUES %s
         ON CONFLICT (category) 
         DO UPDATE SET weight_percentage = EXCLUDED.weight_percentage, basket_group = EXCLUDED.basket_group;
     """
 
-    cursor.executemany(insert_query, nisr_cpi_weights)
+    execute_values(cursor, insert_query, nisr_cpi_weights)
     conn.commit()
     cursor.close()
     print("NISR CPI weight reference table synchronized.")
 
 def init_village_prices_table(conn):
-    print("Initializing isolated village level prices table...")
+    print("Initializing local village level prices table...")
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS local_village_prices (
@@ -129,7 +131,7 @@ def fetch_and_sync():
     init_village_prices_table(conn)
     
     conn.close()
-    print("Full system sync completed!")
+    print("Full system sync completed successfully!")
 
 if __name__ == "__main__":
     fetch_and_sync()
